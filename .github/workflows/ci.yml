@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  contracts:
+    name: contracts, fuzzing and kit parity
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: forge fmt --check
+      - run: forge build --sizes
+      - run: FOUNDRY_PROFILE=local forge test -vv
+
+  kit:
+    name: signer kit
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python3 kit/tests/rfc_vectors.py
+      - run: python3 kit/tests/safety.py
+      - run: python3 kit/tests/bench.py
+
+  smoke:
+    name: live smoke test on a local Ethereum node
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python3 smoke/smoke_anvil.py
