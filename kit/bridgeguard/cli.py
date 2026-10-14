@@ -30,6 +30,7 @@ def _show(fields):
 
 def _attest(args, digest, purpose):
     result = {"signer": args.signer, "digest": "0x" + digest.hex(), "ecdsaSignature": "0x", "lmsSignature": None}
+    state.check_binding(args.dir, args.chain_id, args.guard)
     if args.ecdsa_key_file:
         result["ecdsaSignature"] = "0x" + ecdsa.sign_digest(_read_secret(args.ecdsa_key_file), digest).hex()
     result["lmsSignature"] = "0x" + state.sign(args.dir, digest, purpose, args.onchain_next_leaf).hex()
@@ -60,6 +61,8 @@ def main(argv=None):
     g.add_argument("--height", type=int, choices=sorted(LMS_BY_HEIGHT), default=15)
     g.add_argument("--winternitz", type=int, choices=sorted(OTS_BY_W), default=4)
     g.add_argument("--reserve", type=int, default=state.DEFAULT_RESERVE)
+    g.add_argument("--chain-id", type=int, required=True)
+    g.add_argument("--guard", required=True)
 
     s = sub.add_parser("status")
     s.add_argument("--dir", required=True)
@@ -109,7 +112,10 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     if args.cmd == "keygen":
-        pub = state.generate(args.dir, LMS_BY_HEIGHT[args.height], OTS_BY_W[args.winternitz], args.reserve)
+        pub = state.generate(
+            args.dir, LMS_BY_HEIGHT[args.height], OTS_BY_W[args.winternitz], args.reserve,
+            chain_id=args.chain_id, guard=args.guard,
+        )
         _out({"public_key": "0x" + pub.hex(), "key_hash": state.key_hash(pub), "capacity": 1 << args.height, "reserve": args.reserve})
     elif args.cmd == "status":
         st = state.status(args.dir)
@@ -131,7 +137,7 @@ def main(argv=None):
     elif args.cmd == "attest-config":
         try:
             signers = _load_signers(args.signers)
-            encoding.validate_config(signers, args.threshold, args.mode)
+            encoding.validate_config(signers, args.threshold, args.mode, args.chain_id, args.guard)
             d = encoding.config_digest(args.chain_id, args.guard, args.epoch, signers, args.threshold, args.mode)
         except (ValueError, KeyError, TypeError) as e:
             raise SystemExit(f"refusing to sign an invalid configuration, {e}")

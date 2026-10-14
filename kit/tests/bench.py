@@ -17,7 +17,7 @@ for height, lms_type in ((5, 5), (10, 6)):
     for w, ots in ((1, 1), (2, 2), (4, 3), (8, 4)):
         d = os.path.join(base, f"h{height}w{w}")
         t = time.perf_counter()
-        pub = state.generate(d, lms_type, ots, reserve=2)
+        pub = state.generate(d, lms_type, ots, reserve=2, chain_id=1, guard="0x" + "a1" * 20)
         keygen = time.perf_counter() - t
         signs, verifies = [], []
         for k in range(8):

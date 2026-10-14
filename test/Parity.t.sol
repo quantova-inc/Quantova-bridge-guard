@@ -27,7 +27,16 @@ contract ParityTest is Test {
     }
 
     function setUp() public {
-        guard = new BridgeGuard(_signers(3), 2, BridgeGuard.Mode.Hybrid, 60);
+        address predicted = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
+        bytes8 tag = bytes8(keccak256(abi.encode(block.chainid, predicted)));
+        BridgeGuard.Signer[] memory bound = new BridgeGuard.Signer[](3);
+        for (uint256 i = 0; i < 3; i++) {
+            bound[i] = BridgeGuard.Signer(
+                address(uint160(i + 1)), abi.encodePacked(uint32(6), uint32(3), tag, bytes8(_rand()), _rand())
+            );
+        }
+        guard = new BridgeGuard(bound, 2, BridgeGuard.Mode.Hybrid, 60);
+        assertEq(address(guard), predicted);
         uint32[] memory dsts = new uint32[](1);
         dsts[0] = 30101;
         dvn = new LayerZeroQuantumDVN(

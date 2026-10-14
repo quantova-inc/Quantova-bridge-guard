@@ -123,7 +123,12 @@ contract BridgeGuardTest is Test {
     function _newKey(string memory name) internal returns (string memory dir, bytes memory pub) {
         dir = string.concat(base, "/", name);
         pub = vm.parseJsonBytes(
-            _ffi(string.concat(KIT, " keygen --dir ", dir, " --height 10 --winternitz 4 --reserve 4")), ".public_key"
+            _ffi(
+                string.concat(
+                    KIT, " keygen --dir ", dir, " --height 10 --winternitz 4 --reserve 4", _binding(address(guard))
+                )
+            ),
+            ".public_key"
         );
     }
 
@@ -134,16 +139,33 @@ contract BridgeGuardTest is Test {
         r[2] = c;
     }
 
+    function _nextGuard() internal view returns (address) {
+        return vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
+    }
+
+    function _tag(address g) internal view returns (bytes8) {
+        return bytes8(keccak256(abi.encode(block.chainid, g)));
+    }
+
+    function _binding(address g) internal view returns (string memory) {
+        return string.concat(" --chain-id ", vm.toString(block.chainid), " --guard ", vm.toString(g));
+    }
+
     function setUp() public {
         base = _ffi("d=$(mktemp -d) && chmod 700 $d && printf %s $d");
+        address predicted = _nextGuard();
         for (uint256 i = 0; i < N; i++) {
             ecdsaKeys[i] = uint256(keccak256(abi.encode("ecdsa", i)))
                 % 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364140 + 1;
-            string memory out =
-                _ffi(string.concat(KIT, " keygen --dir ", _dir(i), " --height 10 --winternitz 4 --reserve 4"));
+            string memory out = _ffi(
+                string.concat(
+                    KIT, " keygen --dir ", _dir(i), " --height 10 --winternitz 4 --reserve 4", _binding(predicted)
+                )
+            );
             pubs[i] = vm.parseJsonBytes(out, ".public_key");
         }
         guard = new BridgeGuard(_signers(), 3, BridgeGuard.Mode.Hybrid, 60);
+        assertEq(address(guard), predicted);
     }
 
     function test_quorum_hybrid_approves_root() public {
@@ -205,12 +227,12 @@ contract BridgeGuardTest is Test {
         guard.approveRoot(root, a);
     }
 
-    function test_cross_contract_and_cross_chain_replay_rejected() public {
-        BridgeGuard other = new BridgeGuard(_signers(), 3, BridgeGuard.Mode.Hybrid, 60);
+    function test_keys_bound_to_one_guard_and_cross_chain_replay_rejected() public {
+        BridgeGuard.Signer[] memory s = _signers();
+        vm.expectRevert(BridgeGuard.InvalidConfiguration.selector);
+        new BridgeGuard(s, 3, BridgeGuard.Mode.Hybrid, 60);
         bytes32 root = keccak256("root-9");
         BridgeGuard.Attestation[] memory a = _attest(guard.rootDigest(root), _ids(0, 1, 2), true);
-        vm.expectRevert(abi.encodeWithSelector(BridgeGuard.InvalidPostQuantumSignature.selector, 0));
-        other.approveRoot(root, a);
         savedChainId = block.chainid;
         vm.chainId(savedChainId + 1);
         vm.expectRevert(abi.encodeWithSelector(BridgeGuard.InvalidPostQuantumSignature.selector, 0));
@@ -529,9 +551,11 @@ contract BridgeGuardTest is Test {
     }
 
     function test_minimum_root_age_floor() public {
+        BridgeGuard.Signer[] memory s = _fakeSigners(4, 6, 3);
         vm.expectRevert(BridgeGuard.InvalidConfiguration.selector);
-        new BridgeGuard(_signers(), 3, BridgeGuard.Mode.Hybrid, 59);
-        assertEq(new BridgeGuard(_signers(), 3, BridgeGuard.Mode.Hybrid, 60).minimumRootAge(), 60);
+        new BridgeGuard(s, 3, BridgeGuard.Mode.Hybrid, 59);
+        s = _fakeSigners(4, 6, 3);
+        assertEq(new BridgeGuard(s, 3, BridgeGuard.Mode.Hybrid, 60).minimumRootAge(), 60);
     }
 
     function test_proof_depth_is_bounded() public view {
@@ -579,52 +603,101 @@ contract BridgeGuardTest is Test {
     }
 
     function test_invalid_configurations_rejected() public {
-        BridgeGuard.Signer[] memory s = _signers();
+        BridgeGuard.Signer[] memory s = _fakeSigners(4, 6, 3);
+        new BridgeGuard(s, 3, BridgeGuard.Mode.Hybrid, 60);
+        s = _fakeSigners(4, 6, 3);
         vm.expectRevert(BridgeGuard.InvalidConfiguration.selector);
         new BridgeGuard(s, 2, BridgeGuard.Mode.Hybrid, 60);
+        s = _fakeSigners(4, 6, 3);
         vm.expectRevert(BridgeGuard.InvalidConfiguration.selector);
         new BridgeGuard(s, 5, BridgeGuard.Mode.Hybrid, 60);
+        s = _fakeSigners(4, 6, 3);
         s[1].lmsPublicKey = s[0].lmsPublicKey;
         vm.expectRevert(BridgeGuard.InvalidConfiguration.selector);
         new BridgeGuard(s, 3, BridgeGuard.Mode.Hybrid, 60);
-        s = _signers();
+        s = _fakeSigners(4, 6, 3);
         s[2].ecdsa = s[0].ecdsa;
         vm.expectRevert(BridgeGuard.InvalidConfiguration.selector);
         new BridgeGuard(s, 3, BridgeGuard.Mode.Hybrid, 60);
-        s = _signers();
+        s = _fakeSigners(4, 6, 3);
         s[3].lmsPublicKey = hex"00";
         vm.expectRevert(BridgeGuard.InvalidConfiguration.selector);
         new BridgeGuard(s, 3, BridgeGuard.Mode.Hybrid, 60);
     }
 
-    function _fakeSigners(uint256 n, uint32 lmsType, uint32 otsType)
+    function test_keys_bound_to_another_guard_or_chain_rejected() public {
+        address next = _nextGuard();
+        BridgeGuard.Signer[] memory s = _fakeSignersFor(4, 6, 3, address(0xBEEF), block.chainid);
+        vm.expectRevert(BridgeGuard.InvalidConfiguration.selector);
+        new BridgeGuard(s, 3, BridgeGuard.Mode.Hybrid, 60);
+        s = _fakeSignersFor(4, 6, 3, _nextGuard(), block.chainid + 1);
+        vm.expectRevert(BridgeGuard.InvalidConfiguration.selector);
+        new BridgeGuard(s, 3, BridgeGuard.Mode.Hybrid, 60);
+        assertEq(guard.identifierTag(), _tag(address(guard)));
+        assertTrue(next != address(guard));
+    }
+
+    function test_duplicate_identifier_in_committee_rejected() public {
+        BridgeGuard.Signer[] memory s = _fakeSigners(4, 6, 3);
+        bytes memory copy = bytes.concat(s[1].lmsPublicKey);
+        for (uint256 k = 8; k < 24; k++) {
+            copy[k] = s[0].lmsPublicKey[k];
+        }
+        s[1].lmsPublicKey = copy;
+        vm.expectRevert(BridgeGuard.InvalidConfiguration.selector);
+        new BridgeGuard(s, 3, BridgeGuard.Mode.Hybrid, 60);
+    }
+
+    function test_reconfigure_rejects_key_bound_to_another_guard() public {
+        BridgeGuard.Signer[] memory s = _signers();
+        s[3] = _fakeSignersFor(1, 6, 3, address(0xBEEF), block.chainid)[0];
+        s[3].ecdsa = vm.addr(ecdsaKeys[3]);
+        bytes32 cd = guard.configDigest(s, 3, BridgeGuard.Mode.PostQuantum);
+        BridgeGuard.Attestation[] memory q = _attest(cd, _ids(0, 1, 2), true);
+        vm.expectRevert();
+        guard.reconfigure(s, 3, BridgeGuard.Mode.PostQuantum, q);
+        assertEq(guard.epoch(), 1);
+    }
+
+    function _fakeSignersFor(uint256 n, uint32 lmsType, uint32 otsType, address g, uint256 chain)
         internal
         pure
         returns (BridgeGuard.Signer[] memory s)
     {
+        bytes8 tag = bytes8(keccak256(abi.encode(chain, g)));
         s = new BridgeGuard.Signer[](n);
         for (uint256 i = 0; i < n; i++) {
             s[i] = BridgeGuard.Signer(
                 address(uint160(i + 1)),
-                abi.encodePacked(lmsType, otsType, bytes16(keccak256(abi.encode(i))), keccak256(abi.encode("k", i)))
+                abi.encodePacked(lmsType, otsType, tag, bytes8(keccak256(abi.encode(i))), keccak256(abi.encode("k", i)))
             );
         }
     }
 
+    function _fakeSigners(uint256 n, uint32 lmsType, uint32 otsType)
+        internal
+        view
+        returns (BridgeGuard.Signer[] memory)
+    {
+        return _fakeSignersFor(n, lmsType, otsType, _nextGuard(), block.chainid);
+    }
+
+    function _deployFake(uint256 n, uint32 lmsType, uint32 otsType, uint256 t, bool valid) internal {
+        BridgeGuard.Signer[] memory s = _fakeSigners(n, lmsType, otsType);
+        if (!valid) vm.expectRevert(BridgeGuard.InvalidConfiguration.selector);
+        new BridgeGuard(s, t, BridgeGuard.Mode.Hybrid, 60);
+    }
+
     function test_gas_and_size_budget_rejects_unexecutable_configuration() public {
-        new BridgeGuard(_fakeSigners(9, 8, 4), 5, BridgeGuard.Mode.Hybrid, 60);
-        vm.expectRevert(BridgeGuard.InvalidConfiguration.selector);
-        new BridgeGuard(_fakeSigners(11, 8, 4), 6, BridgeGuard.Mode.Hybrid, 60);
-        new BridgeGuard(_fakeSigners(23, 9, 1), 12, BridgeGuard.Mode.Hybrid, 60);
-        vm.expectRevert(BridgeGuard.InvalidConfiguration.selector);
-        new BridgeGuard(_fakeSigners(25, 9, 1), 13, BridgeGuard.Mode.Hybrid, 60);
-        new BridgeGuard(_fakeSigners(47, 8, 3), 24, BridgeGuard.Mode.Hybrid, 60);
-        vm.expectRevert(BridgeGuard.InvalidConfiguration.selector);
-        new BridgeGuard(_fakeSigners(49, 8, 3), 25, BridgeGuard.Mode.Hybrid, 60);
-        vm.expectRevert(BridgeGuard.InvalidConfiguration.selector);
-        new BridgeGuard(_fakeSigners(57, 5, 3), 29, BridgeGuard.Mode.Hybrid, 60);
-        new BridgeGuard(_fakeSigners(49, 5, 2), 25, BridgeGuard.Mode.Hybrid, 60);
-        BridgeGuard.Signer[] memory s = _signers();
+        _deployFake(9, 8, 4, 5, true);
+        _deployFake(11, 8, 4, 6, false);
+        _deployFake(23, 9, 1, 12, true);
+        _deployFake(25, 9, 1, 13, false);
+        _deployFake(47, 8, 3, 24, true);
+        _deployFake(49, 8, 3, 25, false);
+        _deployFake(57, 5, 3, 29, false);
+        _deployFake(49, 5, 2, 25, true);
+        BridgeGuard.Signer[] memory s = _fakeSigners(4, 6, 3);
         bytes memory bad = bytes.concat(s[0].lmsPublicKey);
         bad[3] = 0x0a;
         s[0].lmsPublicKey = bad;
@@ -647,16 +720,16 @@ contract BridgeGuardTest is Test {
     }
 
     function test_minimum_root_age_enforced() public {
-        BridgeGuard delayed = new BridgeGuard(_signers(), 3, BridgeGuard.Mode.Hybrid, 3600);
         bytes32 leaf = keccak256("message");
-        bytes32 root = delayed.leafHash(leaf);
-        delayed.approveRoot(root, _attest(delayed.rootDigest(root), _ids(0, 1, 2), true));
+        bytes32 root = guard.leafHash(leaf);
+        BridgeGuard.Attestation[] memory a = _attest(guard.rootDigest(root), _ids(0, 1, 2), true);
+        guard.approveRoot(root, a);
         bytes32[] memory empty = new bytes32[](0);
-        assertFalse(delayed.isIncluded(root, leaf, 0, empty));
-        vm.warp(vm.getBlockTimestamp() + 3599);
-        assertFalse(delayed.isIncluded(root, leaf, 0, empty));
+        assertFalse(guard.isIncluded(root, leaf, 0, empty));
+        vm.warp(vm.getBlockTimestamp() + 59);
+        assertFalse(guard.isIncluded(root, leaf, 0, empty));
         vm.warp(vm.getBlockTimestamp() + 1);
-        assertTrue(delayed.isIncluded(root, leaf, 0, empty));
+        assertTrue(guard.isIncluded(root, leaf, 0, empty));
     }
 
     function _merkle(bytes32[] memory leaves) internal returns (bytes32 root, string memory out) {

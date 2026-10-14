@@ -56,7 +56,7 @@ LayerZero ReceiveUln302  ←  LayerZeroQuantumDVN.submit  →  commit and lzRece
 ## How bridge developers adopt it
 
 1. **Add the dependency.** In a Foundry project run `forge install quantova-inc/Quantova-bridge-guard` and import the adapters, or deploy the contracts from this repository as they are.
-2. **Generate committee keys.** Each committee member runs the signer kit on its own host and publishes its LMS public key and ECDSA address.
+2. **Generate committee keys.** Fix the guard address first, through CREATE2 or a known deployer nonce. Each committee member then runs the signer kit on its own host with the chain identifier and that guard address, and publishes its LMS public key and ECDSA address.
 3. **Deploy the guard.** Deploy `BridgeGuard` with the signer list, a strict majority threshold, hybrid mode and a minimum root age.
 4. **Deploy the shield for your bridge.** Add the `isIncluded` check to the bridge receive path, or deploy `LayerZeroQuantumDVN` with the guard, the endpoint, the local endpoint identifier, the send library, the supported destinations, a treasury and a fee.
 5. **Run it alongside your current security.** Add the shield next to your existing module or verifiers, so nothing is lost if either side fails. Test the full path on a testnet.
@@ -81,6 +81,7 @@ forge create src/adapters/LayerZeroQuantumDVN.sol:LayerZeroQuantumDVN --construc
 | All or nothing actions | An approval, revocation or rotation either takes full effect or reverts. When an equivocating member costs the quorum, the call reverts with `EquivocationDetected` naming that member and leaf, honest members keep their signatures, and the action succeeds once the key is frozen or left out |
 | Proof of possession | Every new member signs the configuration digest. An identical recorded attestation counts again for the same digest, so a member's proof of possession for a configuration is also its vote for that configuration, and publishing it early cannot block a rotation |
 | Revocation | A quorum can revoke an approved root, and every root waits a minimum root age of at least 60 seconds, set per deployment, before any message can use it |
+| Key binding | The first eight bytes of every LMS identifier I equal the first eight bytes of keccak256 over the chain identifier and the guard address, and the last eight bytes are random per key. The guard rejects keys bound elsewhere and committees with a duplicate identifier, so each key serves exactly one guard on one chain |
 | Membership | Members kept in a rotation need no fresh signature, so an offline honest member is retained. New members, and members whose classical key changes, must prove possession |
 | Fail safe halt | If misuse freezes so many keys that fewer live members remain than the threshold, the guard stops approving anything. `liveSignerCount` exposes the margin, and recovery is a new guard and shield that the application selects |
 | Executability | A committee is accepted only when its worst case approval fits 14M gas and 120 KB of attestation data, and its threshold cost plus 90k gas per member fits 16M gas. Rotation to a committee no larger than the current one is therefore always executable, and the largest growth rotations measured stay far below the EIP 7825 cap of 16,777,216 gas per transaction |
@@ -117,7 +118,7 @@ The largest committees accepted, written as threshold of members.
 | W4 | 24 of 47 | 24 of 47 | 24 of 47 | 24 of 47 | 24 of 47 |
 | W8 | 5 of 9 | 5 of 9 | 5 of 9 | 5 of 9 | 5 of 9 |
 
-The worst case rotations at these limits, growing a committee to its maximum with every key new, measured 11.3M gas for W4, 12.4M gas for W2 and 8.6M gas for W1 at height 5.
+The worst case rotations at these limits, growing a committee to its maximum with every key new, measured 11.5M gas for W4, 12.6M gas for W2 and 8.7M gas for W1 at height 5.
 
 ## Signer kit
 
@@ -125,13 +126,13 @@ The `kit` directory contains a standard library Python signer for committee memb
 
 ```
 export BRIDGEGUARD_HWM_DIR=/var/lib/bridgeguard/hwm
-python3 -m bridgeguard keygen --dir signer --height 15 --winternitz 4
+python3 -m bridgeguard keygen --dir signer --height 20 --winternitz 4 --chain-id 1 --guard 0xGUARD
 python3 -m bridgeguard attest-root --dir signer --signer 0 --chain-id 1 --guard 0xGUARD --epoch 1 --root 0xROOT --onchain-next-leaf 0
 python3 -m bridgeguard attest-config --dir signer --signer 0 --chain-id 1 --guard 0xGUARD --epoch 1 --signers signers.json --threshold 3 --mode 1 --onchain-next-leaf 4
 python3 -m bridgeguard rebind --dir signer --onchain-next-leaf 9 --issued-upper-bound 40
 ```
 
-Every signing command needs the environment variable `BRIDGEGUARD_HWM_DIR`, an absolute path to a high water mark directory on storage separate from the key directory. Before it releases a signature the kit holds a lock for the key that spans every copy of the key on the host, advances a monotonic high water mark that never moves backwards, and reserves the leaf in the key state, both on durable storage. It refuses to sign when the key state is behind the high water mark, the signing journal or the on chain leaf counter. It refuses directories accessible by other users or carrying an access control list, refuses symbolic links, verifies every leaf before reserving it, keeps reserve leaves for revocation and reconfiguration, and validates every configuration against the contract rules before signing it.
+Every signing command needs the environment variable `BRIDGEGUARD_HWM_DIR`, an absolute path to a high water mark directory on storage separate from the key directory. Before it releases a signature the kit holds a lock for the key that spans every copy of the key on the host, advances a monotonic high water mark that never moves backwards, and reserves the leaf in the key state, both on durable storage. It refuses to sign when the key state is behind the high water mark, the signing journal or the on chain leaf counter. It refuses directories accessible by other users or carrying an access control list, refuses symbolic links, verifies every leaf before reserving it, keeps reserve leaves for revocation and reconfiguration, and validates every configuration against the contract rules before signing it. Keys are generated bound to one chain and one guard, and the kit refuses any signing request for another chain or guard before it touches leaf state.
 
 A key directory that was moved or copied must be rebound with `rebind`, which jumps past every leaf the high water mark, the journal and the chain have seen. When the high water mark is lost, `rebind` also needs an upper bound on issued leaves taken from the aggregator and watcher logs, otherwise the key must be retired. `retire` writes a tombstone into the high water mark, so no copy of a retired key can sign or be rebound on that host.
 
@@ -141,7 +142,7 @@ The LMS randomizer is derived deterministically with HMAC SHA 256 under a dedica
 
 An LMS key is stateful. Each key signs at most 2 to the power of its tree height times. Run exactly one signer host per key on a local file system. Never back up, restore, copy or clone a key directory. A key that must be restored is retired and replaced through reconfiguration. Keep keys and the high water mark off storage that can be snapshotted, replicated or rolled back. The high water mark protects against restoring the key directory alone, not against rolling back a whole host, so prefer a hardware security module with a monotonic counter where one is available. Height 5 keys are for testing, since they have too few leaves to rebind. The pure Python kit generates heights up to 20.
 
-The kit refuses key and high water mark directories on network file systems such as NFS and SMB, where file locks are not reliable. A block level clone, a virtual machine snapshot or a disk image keeps the directory inode, so the kit cannot tell a clone from the original, and two live clones of one key would reuse leaves. Never run a cloned signer host. Pass the on chain leaf counter to every signing command. Run a watcher that submits any two signatures from one leaf to `reportEquivocation` on every guard that lists the key, and a relayer that retries an action without the named member after `EquivocationDetected`. Monitor remaining leaves and rotate keys before the reserve is reached. Roots approved by an earlier committee remain valid until revoked, so revoke them when a committee is rotated for cause.
+The kit refuses key and high water mark directories on network file systems such as NFS and SMB, where file locks are not reliable. A block level clone, a virtual machine snapshot or a disk image keeps the directory inode, so the kit cannot tell a clone from the original, and two live clones of one key would reuse leaves. Never run a cloned signer host. Pass the on chain leaf counter to every signing command. Run a watcher that submits any two signatures from one leaf to `reportEquivocation` on every guard that lists the key, and a relayer that retries an action without the named member after `EquivocationDetected`. Monitor remaining leaves and rotate keys before the reserve is reached. Roots approved by an earlier committee remain valid until revoked, so revoke them when a committee is rotated for cause. Recovery after a halt is a new guard at a new address, which needs fresh keys for every member. Size each committee so that members minus threshold covers the keys that could be lost or frozen at the same time.
 
 ## Scope of protection
 
