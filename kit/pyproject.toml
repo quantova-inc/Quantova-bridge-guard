@@ -1,0 +1,14 @@
+[project]
+name = "bridgeguard"
+version = "0.3.0"
+description = "Signer kit for the Quantova Bridge Guard, LMS RFC 8554 hash based signatures with hybrid ECDSA attestations"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0 OR MIT" }
+authors = [{ name = "Quantova Inc" }]
+
+[project.scripts]
+bridgeguard = "bridgeguard.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
