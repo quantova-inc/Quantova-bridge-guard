@@ -46,6 +46,10 @@ def encode_signers(signers):
 REVOKE_TAG = keccak256(b"QUANTOVA_BRIDGE_GUARD_REVOKE_V1")
 
 
+def identifier_tag(chain_id, guard):
+    return keccak256(word(chain_id) + addr(guard))[:8]
+
+
 def root_digest(chain_id, guard, epoch, root):
     return keccak256(ROOT_TAG + word(chain_id) + addr(guard) + word(epoch, 64) + b32(root))
 
@@ -120,7 +124,7 @@ def attestation_cost(public_key):
     return gas, size
 
 
-def validate_config(signers, threshold, mode):
+def validate_config(signers, threshold, mode, chain_id=None, guard=None):
     n = len(signers)
     if n == 0 or threshold > n or threshold * 2 <= n:
         raise ValueError("threshold must be a strict majority of the signer set")
@@ -128,6 +132,8 @@ def validate_config(signers, threshold, mode):
     worst_size = 0
     seen_keys = set()
     seen_ecdsa = set()
+    seen_identifiers = set()
+    tag = identifier_tag(chain_id, guard) if chain_id is not None and guard is not None else None
     for ecdsa_address, public_key in signers:
         gas, size = attestation_cost(public_key)
         if gas == 0:
@@ -137,6 +143,12 @@ def validate_config(signers, threshold, mode):
         if public_key in seen_keys:
             raise ValueError("duplicate LMS public key")
         seen_keys.add(public_key)
+        identifier = bytes(public_key[8:24])
+        if tag is not None and identifier[:8] != tag:
+            raise ValueError("LMS key is not bound to this guard and chain")
+        if identifier in seen_identifiers:
+            raise ValueError("duplicate LMS identifier")
+        seen_identifiers.add(identifier)
         if mode == 0:
             a = addr(ecdsa_address)
             if a == bytes(32):

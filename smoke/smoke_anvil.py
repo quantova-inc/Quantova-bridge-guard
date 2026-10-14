@@ -62,12 +62,16 @@ try:
     bal = int(run(["cast", "balance", "--rpc-url", RPC, "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"]))
     step("local Ethereum node running with funded test account", bal > 0, f"{bal / 1e18:.0f} test ETH")
 
+    deployer_address = run(["cast", "wallet", "address", "--private-key", DEPLOYER])
+    nonce = run(["cast", "nonce", "--rpc-url", RPC, deployer_address])
+    predicted_guard = run(["cast", "compute-address", "--nonce", nonce, deployer_address]).split()[-1]
     work = tempfile.mkdtemp()
     os.chmod(work, 0o700)
     signers = []
     for i in range(4):
         kd = os.path.join(work, f"signer{i}")
-        pub = kit("keygen", "--dir", kd, "--height", "10", "--winternitz", "4", "--reserve", "8")["public_key"]
+        pub = kit("keygen", "--dir", kd, "--height", "10", "--winternitz", "4", "--reserve", "8",
+                  "--chain-id", str(CHAIN), "--guard", predicted_guard)["public_key"]
         ek = os.path.join(work, f"ecdsa{i}.key")
         fd = os.open(ek, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         os.write(fd, secrets.token_hex(32).encode())
@@ -78,7 +82,7 @@ try:
 
     signer_arg = "[" + ",".join(f"({s['addr']},{s['pub']})" for s in signers) + "]"
     guard = create("src/BridgeGuard.sol:BridgeGuard", signer_arg, "3", "0", "60")
-    step("BridgeGuard deployed", True, guard)
+    step("BridgeGuard deployed at the address its keys are bound to", guard.lower() == predicted_guard.lower(), guard)
     uln = create("test/BridgeGuard.t.sol:MockReceiveUln")
     sendlib = create("test/BridgeGuard.t.sol:MockSendLib")
     endpoint = create("test/BridgeGuard.t.sol:MockEndpoint")

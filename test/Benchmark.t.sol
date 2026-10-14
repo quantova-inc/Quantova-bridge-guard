@@ -38,7 +38,7 @@ contract BenchmarkTest is Test {
         return string.concat(base, "/b", vm.toString(i));
     }
 
-    function _key(uint256 height, uint256 w) internal returns (uint256 i, bytes memory pub) {
+    function _key(uint256 height, uint256 w, address g) internal returns (uint256 i, bytes memory pub) {
         if (bytes(base).length == 0) base = string(_ffi("d=$(mktemp -d) && chmod 700 $d && printf %s $d"));
         i = keys++;
         string memory out = string(
@@ -51,7 +51,10 @@ contract BenchmarkTest is Test {
                     vm.toString(height),
                     " --winternitz ",
                     vm.toString(w),
-                    " --reserve 2"
+                    " --reserve 2 --chain-id ",
+                    vm.toString(block.chainid),
+                    " --guard ",
+                    vm.toString(g)
                 )
             )
         );
@@ -78,7 +81,7 @@ contract BenchmarkTest is Test {
         uint256[2] memory hs = [uint256(5), 10];
         for (uint256 a = 0; a < 2; a++) {
             for (uint256 b = 0; b < 4; b++) {
-                (uint256 i, bytes memory pub) = _key(hs[a], ws[b]);
+                (uint256 i, bytes memory pub) = _key(hs[a], ws[b], address(h));
                 uint256 lo = type(uint256).max;
                 uint256 hi;
                 uint256 total;
@@ -103,9 +106,10 @@ contract BenchmarkTest is Test {
     }
 
     function _committee(uint256 n, uint256 first) internal returns (BridgeGuard.Signer[] memory s) {
+        address g = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
         s = new BridgeGuard.Signer[](n);
         for (uint256 k = 0; k < n; k++) {
-            (uint256 i, bytes memory pub) = _key(10, 4);
+            (uint256 i, bytes memory pub) = _key(10, 4, g);
             assertEq(i, first + k);
             s[k] = BridgeGuard.Signer(vm.addr(i + 1), pub);
         }

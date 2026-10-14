@@ -98,6 +98,11 @@ contract BridgeGuard is IBridgeGuard {
         _configure(signers_, threshold_, mode_);
     }
 
+    /// Prefix binding every LMS identifier to this guard and chain
+    function identifierTag() public view returns (bytes8) {
+        return bytes8(keccak256(abi.encode(block.chainid, address(this))));
+    }
+
     /// Returns the number of committee members
     function signerCount() external view returns (uint256) {
         return _signers.length;
@@ -373,9 +378,12 @@ contract BridgeGuard is IBridgeGuard {
         if (n == 0 || threshold_ > n || threshold_ * 2 <= n) revert InvalidConfiguration();
         uint256 worstGas;
         uint256 worstBytes;
+        bytes8 tag = identifierTag();
         for (uint256 i = 0; i < n; i++) {
             Signer memory s = signers_[i];
             if (s.lmsPublicKey.length != LMSVerifier.PUBLIC_KEY_LENGTH) revert InvalidConfiguration();
+            bytes16 identifier = _identifier(s.lmsPublicKey);
+            if (bytes8(identifier) != tag) revert InvalidConfiguration();
             (uint256 gasCost, uint256 bytesCost) = _attestationCost(s.lmsPublicKey);
             if (gasCost == 0) revert InvalidConfiguration();
             if (gasCost > worstGas) worstGas = gasCost;
@@ -384,6 +392,7 @@ contract BridgeGuard is IBridgeGuard {
             if (mode_ == Mode.Hybrid && s.ecdsa == address(0)) revert InvalidConfiguration();
             for (uint256 j = 0; j < i; j++) {
                 if (keccak256(signers_[j].lmsPublicKey) == keccak256(s.lmsPublicKey)) revert InvalidConfiguration();
+                if (_identifier(signers_[j].lmsPublicKey) == identifier) revert InvalidConfiguration();
                 if (mode_ == Mode.Hybrid && signers_[j].ecdsa == s.ecdsa) revert InvalidConfiguration();
             }
             _signers.push(s);
@@ -396,6 +405,15 @@ contract BridgeGuard is IBridgeGuard {
         mode = mode_;
         epoch += 1;
         emit ConfigurationChanged(epoch, n, threshold_, mode_);
+    }
+
+    /// Reads the LMS identifier I from a public key
+    function _identifier(bytes memory pub) internal pure returns (bytes16) {
+        bytes32 word;
+        assembly {
+            word := mload(add(pub, 40))
+        }
+        return bytes16(word);
     }
 
     /// Estimates the worst case gas and calldata of one attestation for a key

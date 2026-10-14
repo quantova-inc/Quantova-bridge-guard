@@ -5,6 +5,9 @@ os.environ["BRIDGEGUARD_HWM_DIR"] = hwm
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from bridgeguard import state, lms, encoding
 
+CHAIN = 1
+GUARD = "0x" + "a1" * 20
+
 results = []
 
 
@@ -22,7 +25,7 @@ def expect_error(fn, contains):
 
 
 digest = bytes(32)
-d = os.path.join(base, "k"); state.generate(d, 5, 3, reserve=4)
+d = os.path.join(base, "k"); state.generate(d, 5, 3, reserve=4, chain_id=CHAIN, guard=GUARD)
 for i in range(28):
     state.sign(d, os.urandom(32), "root", 0)
 check("root signing refused once only reserve remains", expect_error(lambda: state.sign(d, digest, "root", 0), "reserve"))
@@ -31,7 +34,7 @@ check("leaf counter advanced exactly", state.status(d)["next"] == 29)
 check("on chain counter above capacity rejected as an input error", expect_error(lambda: state.sign(d, digest, "config", 10**9), "outside"))
 check("an input error does not retire the key", not state.status(d)["retired"])
 
-r = os.path.join(base, "restore"); state.generate(r, 6, 3, reserve=2)
+r = os.path.join(base, "restore"); state.generate(r, 6, 3, reserve=2, chain_id=CHAIN, guard=GUARD)
 state.sign(r, os.urandom(32), "root", 0)
 saved_state = open(os.path.join(r, "state.json"), "rb").read()
 saved_journal = open(os.path.join(r, "journal.log"), "rb").read()
@@ -43,14 +46,14 @@ target = state.rebind(r, 1)
 check("rebind jumps past every possibly issued leaf", target >= 2 + state.REBIND_GAP)
 check("signing after rebind uses a fresh leaf", lms.leaf_index(state.sign(r, os.urandom(32), "root", 2)) == target)
 
-c = os.path.join(base, "clone"); state.generate(c, 6, 3, reserve=2)
+c = os.path.join(base, "clone"); state.generate(c, 6, 3, reserve=2, chain_id=CHAIN, guard=GUARD)
 state.sign(c, os.urandom(32), "root", 0)
 c2 = os.path.join(base, "clone2"); shutil.copytree(c, c2); os.chmod(c2, 0o700)
 check("copied key directory refused", expect_error(lambda: state.sign(c2, digest, "config", 1), "copied"))
 state.rebind(c2, 1)
 check("original refused after a clone was rebound", expect_error(lambda: state.sign(c, os.urandom(32), "root", 1), "behind"))
 
-b = os.path.join(base, "behind"); state.generate(b, 5, 3, reserve=2)
+b = os.path.join(base, "behind"); state.generate(b, 5, 3, reserve=2, chain_id=CHAIN, guard=GUARD)
 state.sign(b, digest, "root", 0)
 check("state behind the on chain counter refused", expect_error(lambda: state.sign(b, digest, "root", 5), "behind"))
 check("being behind does not retire automatically", not state.status(b)["retired"])
@@ -58,29 +61,29 @@ state.retire(b, "operator decision")
 check("retired key never signs again", expect_error(lambda: state.sign(b, digest, "root", 0), "retired"))
 check("retired key cannot be rebound", expect_error(lambda: state.rebind(b, 1), "retired"))
 
-d3 = os.path.join(base, "k3"); state.generate(d3, 5, 3, reserve=2)
+d3 = os.path.join(base, "k3"); state.generate(d3, 5, 3, reserve=2, chain_id=CHAIN, guard=GUARD)
 tree = os.path.join(d3, "tree.bin"); blob = bytearray(open(tree, "rb").read())
 blob[32 * ((1 << 5) + 0)] ^= 0xFF
 os.chmod(tree, 0o600); open(tree, "wb").write(bytes(blob)); os.chmod(tree, 0o600)
 check("corrupt tree cache detected", expect_error(lambda: state.sign(d3, digest, "root", 0), "corrupt"))
 check("corrupt tree cache burned no leaf", json.load(open(os.path.join(d3, "state.json")))["next"] == 0)
 
-d4 = os.path.join(base, "k4"); state.generate(d4, 5, 3, reserve=2); os.chmod(d4, 0o755)
+d4 = os.path.join(base, "k4"); state.generate(d4, 5, 3, reserve=2, chain_id=CHAIN, guard=GUARD); os.chmod(d4, 0o755)
 check("group or world accessible directory refused", expect_error(lambda: state.sign(d4, digest, "root", 0), "group or others"))
-d5 = os.path.join(base, "k5"); state.generate(d5, 5, 3, reserve=2)
+d5 = os.path.join(base, "k5"); state.generate(d5, 5, 3, reserve=2, chain_id=CHAIN, guard=GUARD)
 os.rename(os.path.join(d5, "key.json"), os.path.join(base, "realkey.json")); os.symlink(os.path.join(base, "realkey.json"), os.path.join(d5, "key.json"))
 check("symlinked key file refused", expect_error(lambda: state.sign(d5, digest, "root", 0), "regular file"))
 if sys.platform == "darwin":
-    d7 = os.path.join(base, "k7"); state.generate(d7, 5, 3, reserve=2)
+    d7 = os.path.join(base, "k7"); state.generate(d7, 5, 3, reserve=2, chain_id=CHAIN, guard=GUARD)
     subprocess.run(["chmod", "+a", "everyone allow add_file,delete_child", d7], check=True)
     check("directory with an access control list refused", expect_error(lambda: state.sign(d7, digest, "root", 0), "access control"))
-    d9 = os.path.join(base, "k9"); state.generate(d9, 5, 3, reserve=2)
+    d9 = os.path.join(base, "k9"); state.generate(d9, 5, 3, reserve=2, chain_id=CHAIN, guard=GUARD)
     subprocess.run(["chmod", "+a", "everyone allow read", os.path.join(d9, "key.json")], check=True)
     check("key file with an access control list refused", expect_error(lambda: state.sign(d9, digest, "root", 0), "access control"))
-    d10 = os.path.join(base, "-k"); state.generate(d10, 5, 3, reserve=2)
+    d10 = os.path.join(base, "-k"); state.generate(d10, 5, 3, reserve=2, chain_id=CHAIN, guard=GUARD)
     subprocess.run(["chmod", "+a", "everyone allow add_file", d10], check=True)
     check("option like directory name cannot hide an access control list", expect_error(lambda: state.sign(d10, digest, "root", 0), "access control"))
-d8 = os.path.join(base, "k8"); state.generate(d8, 5, 3, reserve=2)
+d8 = os.path.join(base, "k8"); state.generate(d8, 5, 3, reserve=2, chain_id=CHAIN, guard=GUARD)
 check("signing without the on chain counter refused", expect_error(lambda: state.sign(d8, digest, "root", None), "required"))
 sk8 = state._load(d8)
 check("randomizer is deterministic per leaf and message", state._randomizer(sk8.randomizer_key, 3, digest) == state._randomizer(sk8.randomizer_key, 3, digest)
@@ -90,8 +93,8 @@ pub8 = sk8.public_key()
 check("high water mark never moves backwards", expect_error(lambda: state._hwm_write(d8, pub8, 0) or state._hwm_write(d8, pub8, 5) or state._hwm_write(d8, pub8, 4), "backwards"))
 check("invalid configuration rejected before signing", expect_error(lambda: encoding.validate_config([("0x" + "11" * 20, b"\x00")], 1, 0), "malformed"))
 check("minority threshold rejected before signing", expect_error(lambda: encoding.validate_config([("0x" + "11" * 20, pub8), ("0x" + "22" * 20, pub8 + b"")], 1, 0), "majority"))
-check("keygen into existing directory refused", expect_error(lambda: state.generate(d, 5, 3), "exists"))
-check("heights above 20 refused in pure python", expect_error(lambda: state.generate(os.path.join(base, "big"), 9, 3), "native"))
+check("keygen into existing directory refused", expect_error(lambda: state.generate(d, 5, 3, chain_id=CHAIN, guard=GUARD), "exists"))
+check("heights above 20 refused in pure python", expect_error(lambda: state.generate(os.path.join(base, "big"), 9, 3, chain_id=CHAIN, guard=GUARD), "native"))
 
 saved_env = os.environ.pop("BRIDGEGUARD_HWM_DIR")
 check("signing without an explicit high water mark directory refused", expect_error(lambda: state.sign(d8, digest, "root", 0), "BRIDGEGUARD_HWM_DIR"))
@@ -100,14 +103,14 @@ check("relative high water mark directory refused", expect_error(lambda: state.s
 os.environ["BRIDGEGUARD_HWM_DIR"] = os.path.join(d8, "hwm")
 inside_sign = expect_error(lambda: state.sign(d8, digest, "root", 0), "outside")
 os.environ["BRIDGEGUARD_HWM_DIR"] = os.path.join(base, "k11", "hwm")
-inside_gen = expect_error(lambda: state.generate(os.path.join(base, "k11"), 5, 3, reserve=2), "outside")
+inside_gen = expect_error(lambda: state.generate(os.path.join(base, "k11"), 5, 3, reserve=2, chain_id=CHAIN, guard=GUARD), "outside")
 os.environ["BRIDGEGUARD_HWM_DIR"] = base
 parent = expect_error(lambda: state.sign(d8, digest, "root", 0), "outside")
 check("high water mark inside or above the key directory refused", inside_sign and inside_gen and parent
       and not os.path.exists(os.path.join(d8, "hwm")) and not os.path.exists(os.path.join(base, "k11")))
 os.environ["BRIDGEGUARD_HWM_DIR"] = saved_env
 
-m = os.path.join(base, "lost"); state.generate(m, 6, 3, reserve=2)
+m = os.path.join(base, "lost"); state.generate(m, 6, 3, reserve=2, chain_id=CHAIN, guard=GUARD)
 for _ in range(3):
     state.sign(m, os.urandom(32), "root", 0)
 pubm = bytes.fromhex(state.status(m)["public_key"])
@@ -117,7 +120,7 @@ check("lost high water mark refuses rebind without an issued leaf bound", expect
 target = state.rebind(m, 1, issued_upper_bound=40)
 check("rebind with an issued leaf bound jumps past the bound", target >= 40 + state.REBIND_GAP and state.status(m)["high_water_mark"] == target)
 
-t = os.path.join(base, "tomb"); state.generate(t, 6, 3, reserve=2)
+t = os.path.join(base, "tomb"); state.generate(t, 6, 3, reserve=2, chain_id=CHAIN, guard=GUARD)
 state.sign(t, os.urandom(32), "root", 0)
 backup = os.path.join(base, "tomb_backup"); shutil.copytree(t, backup); os.chmod(backup, 0o700)
 state.retire(t, "rotated out")
@@ -125,7 +128,7 @@ check("retirement tombstone stops a backup copy from rebinding", expect_error(la
 check("retirement tombstone stops a backup copy from signing", expect_error(lambda: state.sign(backup, digest, "root", 1), "retired")
       or expect_error(lambda: state.sign(backup, digest, "root", 1), "copied"))
 
-j = os.path.join(base, "torn"); state.generate(j, 5, 3, reserve=2)
+j = os.path.join(base, "torn"); state.generate(j, 5, 3, reserve=2, chain_id=CHAIN, guard=GUARD)
 state.sign(j, os.urandom(32), "root", 0)
 jp = os.path.join(j, "journal.log")
 with open(jp, "ab") as f:
@@ -136,7 +139,7 @@ os.chmod(jp, 0o600); open(jp, "wb").write(data); os.chmod(jp, 0o600)
 check("damaged journal line before the end refused", expect_error(lambda: state.sign(j, os.urandom(32), "root", 2), "damaged"))
 
 import fcntl
-lk = os.path.join(base, "lk"); state.generate(lk, 5, 3, reserve=2)
+lk = os.path.join(base, "lk"); state.generate(lk, 5, 3, reserve=2, chain_id=CHAIN, guard=GUARD)
 pubk = bytes.fromhex(state.status(lk)["public_key"])
 lfd = os.open(os.path.join(hwm, state._hwm_name(pubk) + ".lock"), os.O_RDWR | os.O_CREAT, 0o600)
 fcntl.flock(lfd, fcntl.LOCK_EX)
@@ -162,7 +165,7 @@ except ValueError:
     accepted = False
 check("rotation gas rule accepts 24 of 47 W4 H20 signers", accepted)
 
-d6 = os.path.join(base, "k6"); state.generate(d6, 6, 3, reserve=4)
+d6 = os.path.join(base, "k6"); state.generate(d6, 6, 3, reserve=4, chain_id=CHAIN, guard=GUARD)
 code = (f"import sys,os;os.environ['BRIDGEGUARD_HWM_DIR']={hwm!r};sys.path.insert(0,{os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')!r});"
         f"from bridgeguard import state;[sys.stdout.write(str(int.from_bytes(state.sign({d6!r},os.urandom(32),'root',0)[:4],'big'))+chr(10)) for _ in range(25)]")
 procs = [subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True) for _ in range(8)]
@@ -172,7 +175,7 @@ for p in procs:
 check(f"8 concurrent signer processes, {len(leaves)} signatures, no duplicate leaf", len(leaves) == 200 and len(set(leaves)) == 200)
 journal = [json.loads(l)["leaf"] for l in open(os.path.join(d6, "journal.log"))]
 check("journal records every leaf exactly once", sorted(journal) == sorted(leaves))
-nf = os.path.join(base, "nfs"); state.generate(nf, 5, 3, reserve=2)
+nf = os.path.join(base, "nfs"); state.generate(nf, 5, 3, reserve=2, chain_id=CHAIN, guard=GUARD)
 real_fs = state._filesystem_type
 state._filesystem_type = lambda p: "nfs4" if os.path.realpath(p).startswith(os.path.realpath(nf)) else real_fs(p)
 check("key directory on a network file system refused", expect_error(lambda: state.sign(nf, digest, "root", 0), "network file system"))
@@ -184,6 +187,24 @@ check("linux mount table resolves the deepest mount", state._deepest("/srv/keys/
       and state._deepest("/home/k", state._linux_mounts(mounts)) == "ext4")
 check("macOS mount table resolves the deepest mount", state._deepest("/Volumes/k/a", state._darwin_mounts(
     "/dev/disk3s1 on / (apfs, local)\nhost:/x on /Volumes/k (nfs, nodev)")) == "nfs")
+
+bd = os.path.join(base, "bound"); pub_bd = state.generate(bd, 5, 3, reserve=2, chain_id=CHAIN, guard=GUARD)
+check("key identifier carries the guard and chain prefix", pub_bd[8:16] == encoding.identifier_tag(CHAIN, GUARD))
+other = os.path.join(base, "bound2"); pub_other = state.generate(other, 5, 3, reserve=2, chain_id=CHAIN, guard=GUARD)
+check("keys for one guard keep distinct identifiers", pub_bd[8:24] != pub_other[8:24])
+check("signing for the bound guard is allowed", state.check_binding(bd, CHAIN, GUARD) is None)
+check("signing for another guard refused", expect_error(lambda: state.check_binding(bd, CHAIN, "0x" + "b2" * 20), "another guard"))
+check("signing for another chain refused", expect_error(lambda: state.check_binding(bd, CHAIN + 1, GUARD), "another guard"))
+committee = [("0x" + f"{i + 1:040x}", p) for i, p in enumerate((pub_bd, pub_other))]
+try:
+    encoding.validate_config(committee, 2, 0, CHAIN, GUARD)
+    bound_ok = True
+except ValueError:
+    bound_ok = False
+check("committee of keys bound to the guard validates", bound_ok)
+check("committee validated for another guard refused", expect_error(lambda: encoding.validate_config(committee, 2, 0, CHAIN, "0x" + "b2" * 20), "not bound"))
+dup = bytearray(pub_other); dup[8:24] = pub_bd[8:24]; dup[24] ^= 1
+check("committee with a duplicate identifier refused", expect_error(lambda: encoding.validate_config([committee[0], ("0x" + "02" * 20, bytes(dup))], 2, 0, CHAIN, GUARD), "duplicate LMS identifier"))
 
 ok = sum(1 for _, r in results if r)
 print(f"{ok} of {len(results)} kit safety checks passed")

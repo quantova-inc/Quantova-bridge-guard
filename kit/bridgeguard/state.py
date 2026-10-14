@@ -9,7 +9,7 @@ import stat
 import subprocess
 import sys
 
-from . import lms
+from . import encoding, lms
 from .keccak import keccak256
 
 KEY_FILE = "key.json"
@@ -269,7 +269,7 @@ class _Lock:
         os.close(self.fd)
 
 
-def generate(directory, lms_type, ots_type, reserve=DEFAULT_RESERVE):
+def generate(directory, lms_type, ots_type, reserve=DEFAULT_RESERVE, *, chain_id, guard):
     if lms_type > MAX_HEIGHT_TYPE:
         raise StateError("tree heights above 20 need a native key generator")
     _hwm_directory(directory)
@@ -278,7 +278,7 @@ def generate(directory, lms_type, ots_type, reserve=DEFAULT_RESERVE):
     with _Lock(directory):
         if os.path.exists(os.path.join(directory, KEY_FILE)):
             raise StateError("key already exists in this directory")
-        ident = secrets.token_bytes(16)
+        ident = encoding.identifier_tag(chain_id, guard) + secrets.token_bytes(8)
         seed = secrets.token_bytes(32)
         randomizer_key = secrets.token_bytes(32)
         sk = lms.PrivateKey(lms_type, ots_type, ident, seed).build()
@@ -292,12 +292,21 @@ def generate(directory, lms_type, ots_type, reserve=DEFAULT_RESERVE):
             key = {
                 "lms_type": lms_type, "ots_type": ots_type, "ident": ident.hex(), "seed": seed.hex(),
                 "randomizer_key": randomizer_key.hex(), "public_key": pub.hex(),
+                "chain_id": int(chain_id), "guard": "0x" + encoding.addr(guard)[12:].hex(),
             }
             _write_atomic(directory, KEY_FILE, json.dumps(key).encode())
             st = {"next": 0, "public_key": pub.hex(), "reserve": reserve, "fingerprint": _fingerprint(directory)}
             _write_atomic(directory, STATE_FILE, json.dumps(st).encode())
             _hwm_write(directory, pub, 0)
     return pub
+
+
+def check_binding(directory, chain_id, guard):
+    _check_directory(directory)
+    key = _read(directory, KEY_FILE)
+    ident = bytes.fromhex(key["ident"])
+    if ident[:8] != encoding.identifier_tag(chain_id, guard):
+        raise StateError("key is bound to another guard or chain, refusing to sign")
 
 
 def _load(directory):
