@@ -169,7 +169,7 @@ The contract suite covers the quorum, rotation, freezing, replay binding, the La
 
 ## Ethereum standard
 
-Quantova Inc has proposed this attestation layer to the Ethereum organisation as the standard Post Quantum Bridge Attestation, in pull request 2071 of the ethereum/ERCs repository, https://github.com/ethereum/ERCs/pull/2071. The standard fixes the digests, the Merkle construction, the quorum and freeze rules and the guard interface, so any bridge on Ethereum can adopt the same shield.
+Quantova Inc has proposed this shield to the Ethereum organisation as the standard Quantum Bridge Shield, in pull request 2071 of the ethereum/ERCs repository, https://github.com/ethereum/ERCs/pull/2071. The standard fixes the digests, the Merkle construction, the quorum and freeze rules and the guard interface, so any bridge on Ethereum can adopt the same shield.
 
 ## Audit and benchmarks
 
