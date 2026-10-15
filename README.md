@@ -170,7 +170,7 @@ The contract suite covers the quorum, rotation, freezing, replay binding, the La
 
 ## Ethereum standard
 
-Quantova Inc has proposed this shield to the Ethereum organisation as the standard Quantum Bridge Shield, in pull request 2071 of the ethereum/ERCs repository, https://github.com/ethereum/ERCs/pull/2071. The standard fixes the digests, the Merkle construction, the quorum and freeze rules and the guard interface, so any bridge on Ethereum can adopt the same shield.
+Quantova Inc is the author of ERC-8443 Quantum Bridge Shield, the standard for this shield in the Ethereum organisation, in pull request 2071 of the ethereum/ERCs repository, https://github.com/ethereum/ERCs/pull/2071. This repository is its reference implementation, and the domain tags are the ERC-8443 tags. The standard fixes the digests, the Merkle construction, the quorum and freeze rules and the guard interface, so any bridge on Ethereum can adopt the same shield.
 
 ## Audit and benchmarks
 

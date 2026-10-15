@@ -39,9 +39,9 @@ contract BridgeGuard is IBridgeGuard {
         Repeat
     }
 
-    bytes32 public constant ROOT_TAG = keccak256("QUANTOVA_BRIDGE_GUARD_ROOT_V1");
-    bytes32 public constant REVOKE_TAG = keccak256("QUANTOVA_BRIDGE_GUARD_REVOKE_V1");
-    bytes32 public constant CONFIG_TAG = keccak256("QUANTOVA_BRIDGE_GUARD_CONFIG_V1");
+    bytes32 public constant ROOT_TAG = keccak256("ERC8443_ROOT_V1");
+    bytes32 public constant REVOKE_TAG = keccak256("ERC8443_REVOKE_V1");
+    bytes32 public constant CONFIG_TAG = keccak256("ERC8443_CONFIG_V1");
     bytes1 internal constant LEAF_PREFIX = 0x00;
     bytes1 internal constant NODE_PREFIX = 0x01;
     uint256 internal constant SECP256K1_HALF_N = 0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0;

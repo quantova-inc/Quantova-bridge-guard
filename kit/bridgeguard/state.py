@@ -406,7 +406,7 @@ def rebind(directory, onchain_next_leaf, issued_upper_bound=None):
 
 def _randomizer(randomizer_key, q, message):
     return hmac.new(
-        randomizer_key, b"QUANTOVA_BRIDGE_GUARD_RANDOMIZER_V1" + q.to_bytes(4, "big") + message, hashlib.sha256
+        randomizer_key, b"ERC8443_RANDOMIZER_V1" + q.to_bytes(4, "big") + message, hashlib.sha256
     ).digest()
 
 
