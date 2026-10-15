@@ -5,7 +5,7 @@ import {ILayerZeroDVN, IReceiveUlnVerify, ISendLibFees, IEndpointInbound} from "
 import {IBridgeGuard} from "../interfaces/IBridgeGuard.sol";
 
 contract LayerZeroQuantumDVN is ILayerZeroDVN {
-    bytes32 public constant LEAF_TAG = keccak256("QUANTOVA_BRIDGE_GUARD_LAYERZERO_V1");
+    bytes32 public constant LEAF_TAG = keccak256("ERC8443_LAYERZERO_V1");
     uint256 internal constant HEADER_LENGTH = 81;
     uint8 internal constant PACKET_VERSION = 1;
     bytes32 internal constant NIL_PAYLOAD_HASH = bytes32(type(uint256).max);

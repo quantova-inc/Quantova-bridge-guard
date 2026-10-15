@@ -1,8 +1,8 @@
 from .keccak import keccak256
 
-ROOT_TAG = keccak256(b"QUANTOVA_BRIDGE_GUARD_ROOT_V1")
-CONFIG_TAG = keccak256(b"QUANTOVA_BRIDGE_GUARD_CONFIG_V1")
-LAYERZERO_TAG = keccak256(b"QUANTOVA_BRIDGE_GUARD_LAYERZERO_V1")
+ROOT_TAG = keccak256(b"ERC8443_ROOT_V1")
+CONFIG_TAG = keccak256(b"ERC8443_CONFIG_V1")
+LAYERZERO_TAG = keccak256(b"ERC8443_LAYERZERO_V1")
 
 
 def word(v, bits=256):
@@ -43,7 +43,7 @@ def encode_signers(signers):
     return word(32) + word(n) + b"".join(offsets) + b"".join(tuples)
 
 
-REVOKE_TAG = keccak256(b"QUANTOVA_BRIDGE_GUARD_REVOKE_V1")
+REVOKE_TAG = keccak256(b"ERC8443_REVOKE_V1")
 
 
 def identifier_tag(chain_id, guard):
