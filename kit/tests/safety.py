@@ -91,8 +91,8 @@ check("randomizer is deterministic per leaf and message", state._randomizer(sk8.
 check("randomizer key is independent of the LMS seed", len(sk8.randomizer_key) == 32 and sk8.randomizer_key != sk8.seed)
 pub8 = sk8.public_key()
 check("high water mark never moves backwards", expect_error(lambda: state._hwm_write(d8, pub8, 0) or state._hwm_write(d8, pub8, 5) or state._hwm_write(d8, pub8, 4), "backwards"))
-check("invalid configuration rejected before signing", expect_error(lambda: encoding.validate_config([("0x" + "11" * 20, b"\x00")], 1, 0), "malformed"))
-check("minority threshold rejected before signing", expect_error(lambda: encoding.validate_config([("0x" + "11" * 20, pub8), ("0x" + "22" * 20, pub8 + b"")], 1, 0), "majority"))
+check("invalid configuration rejected before signing", expect_error(lambda: encoding.validate_config([("0x" + "11" * 20, b"\x00", bytes(32))], 1, 0), "malformed"))
+check("minority threshold rejected before signing", expect_error(lambda: encoding.validate_config([("0x" + "11" * 20, pub8, bytes(32)), ("0x" + "22" * 20, pub8 + b"", bytes(32))], 1, 0), "majority"))
 check("keygen into existing directory refused", expect_error(lambda: state.generate(d, 5, 3, chain_id=CHAIN, guard=GUARD), "exists"))
 check("heights above 20 refused in pure python", expect_error(lambda: state.generate(os.path.join(base, "big"), 9, 3, chain_id=CHAIN, guard=GUARD), "native"))
 
@@ -155,9 +155,9 @@ fcntl.flock(lfd, fcntl.LOCK_UN); os.close(lfd)
 out, _ = proc.communicate(timeout=30)
 check("a per key lock spans every copy of the key", blocked and "signed" in out)
 
-big = [("0x" + f"{i + 1:040x}", (5).to_bytes(4, "big") + (3).to_bytes(4, "big") + i.to_bytes(16, "big") + bytes(32)) for i in range(57)]
+big = [("0x" + f"{i + 1:040x}", (5).to_bytes(4, "big") + (3).to_bytes(4, "big") + i.to_bytes(16, "big") + bytes(32), bytes(32)) for i in range(57)]
 check("rotation gas rule refuses 29 of 57 W4 signers", expect_error(lambda: encoding.validate_config(big, 29, 0), "budget"))
-ok = [("0x" + f"{i + 1:040x}", (8).to_bytes(4, "big") + (3).to_bytes(4, "big") + i.to_bytes(16, "big") + bytes(32)) for i in range(47)]
+ok = [("0x" + f"{i + 1:040x}", (8).to_bytes(4, "big") + (3).to_bytes(4, "big") + i.to_bytes(16, "big") + bytes(32), bytes(32)) for i in range(47)]
 try:
     encoding.validate_config(ok, 24, 0)
     accepted = True
@@ -189,13 +189,16 @@ check("macOS mount table resolves the deepest mount", state._deepest("/Volumes/k
     "/dev/disk3s1 on / (apfs, local)\nhost:/x on /Volumes/k (nfs, nodev)")) == "nfs")
 
 bd = os.path.join(base, "bound"); pub_bd = state.generate(bd, 5, 3, reserve=2, chain_id=CHAIN, guard=GUARD)
-check("key identifier carries the guard and chain prefix", pub_bd[8:16] == encoding.identifier_tag(CHAIN, GUARD))
+salt_bd = state.identifier_salt(bd)
+check("key identifier is fully derived from the chain, the guard and its salt", pub_bd[8:24] == encoding.identifier_for(CHAIN, GUARD, salt_bd))
 other = os.path.join(base, "bound2"); pub_other = state.generate(other, 5, 3, reserve=2, chain_id=CHAIN, guard=GUARD)
+salt_other = state.identifier_salt(other)
+check("every key draws its own identifier salt", salt_bd != salt_other and len(salt_bd) == 32)
 check("keys for one guard keep distinct identifiers", pub_bd[8:24] != pub_other[8:24])
 check("signing for the bound guard is allowed", state.check_binding(bd, CHAIN, GUARD) is None)
 check("signing for another guard refused", expect_error(lambda: state.check_binding(bd, CHAIN, "0x" + "b2" * 20), "another guard"))
 check("signing for another chain refused", expect_error(lambda: state.check_binding(bd, CHAIN + 1, GUARD), "another guard"))
-committee = [("0x" + f"{i + 1:040x}", p) for i, p in enumerate((pub_bd, pub_other))]
+committee = [("0x" + f"{i + 1:040x}", p, t) for i, (p, t) in enumerate(((pub_bd, salt_bd), (pub_other, salt_other)))]
 try:
     encoding.validate_config(committee, 2, 0, CHAIN, GUARD)
     bound_ok = True
@@ -204,7 +207,9 @@ except ValueError:
 check("committee of keys bound to the guard validates", bound_ok)
 check("committee validated for another guard refused", expect_error(lambda: encoding.validate_config(committee, 2, 0, CHAIN, "0x" + "b2" * 20), "not bound"))
 dup = bytearray(pub_other); dup[8:24] = pub_bd[8:24]; dup[24] ^= 1
-check("committee with a duplicate identifier refused", expect_error(lambda: encoding.validate_config([committee[0], ("0x" + "02" * 20, bytes(dup))], 2, 0, CHAIN, GUARD), "duplicate LMS identifier"))
+check("committee with a duplicate identifier refused", expect_error(lambda: encoding.validate_config([committee[0], ("0x" + "02" * 20, bytes(dup), salt_bd)], 2, 0, CHAIN, GUARD), "duplicate LMS identifier"))
+check("a key presented with another salt refused", expect_error(lambda: encoding.validate_config([committee[0], (committee[1][0], pub_other, salt_bd)], 2, 0, CHAIN, GUARD), "not bound"))
+check("a key whose identifier shares only a prefix refused", expect_error(lambda: encoding.validate_config([committee[0], (committee[1][0], bytes(pub_other[:16]) + bytes(8) + bytes(pub_other[24:]), salt_other)], 2, 0, CHAIN, GUARD), "not bound"))
 
 ok = sum(1 for _, r in results if r)
 print(f"{ok} of {len(results)} kit safety checks passed")

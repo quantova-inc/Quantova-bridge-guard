@@ -58,6 +58,7 @@ contract BridgeGuardTest is Test {
     string base;
     uint256[N] ecdsaKeys;
     bytes[N] pubs;
+    bytes32[N] salts;
     BridgeGuard guard;
     uint256 savedChainId;
 
@@ -90,7 +91,7 @@ contract BridgeGuardTest is Test {
     function _signers() internal view returns (BridgeGuard.Signer[] memory s) {
         s = new BridgeGuard.Signer[](N);
         for (uint256 i = 0; i < N; i++) {
-            s[i] = BridgeGuard.Signer(vm.addr(ecdsaKeys[i]), pubs[i]);
+            s[i] = BridgeGuard.Signer(vm.addr(ecdsaKeys[i]), pubs[i], salts[i]);
         }
     }
 
@@ -120,16 +121,15 @@ contract BridgeGuardTest is Test {
         return vm.ffi(c);
     }
 
-    function _newKey(string memory name) internal returns (string memory dir, bytes memory pub) {
+    function _newKey(string memory name) internal returns (string memory dir, bytes memory pub, bytes32 salt) {
         dir = string.concat(base, "/", name);
-        pub = vm.parseJsonBytes(
-            _ffi(
-                string.concat(
-                    KIT, " keygen --dir ", dir, " --height 10 --winternitz 4 --reserve 4", _binding(address(guard))
-                )
-            ),
-            ".public_key"
+        string memory out = _ffi(
+            string.concat(
+                KIT, " keygen --dir ", dir, " --height 10 --winternitz 4 --reserve 4", _binding(address(guard))
+            )
         );
+        pub = vm.parseJsonBytes(out, ".public_key");
+        salt = vm.parseJsonBytes32(out, ".identifier_salt");
     }
 
     function _ids(uint256 a, uint256 b, uint256 c) internal pure returns (uint256[] memory r) {
@@ -141,10 +141,6 @@ contract BridgeGuardTest is Test {
 
     function _nextGuard() internal view returns (address) {
         return vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
-    }
-
-    function _tag(address g) internal view returns (bytes8) {
-        return bytes8(keccak256(abi.encode(block.chainid, g)));
     }
 
     function _binding(address g) internal view returns (string memory) {
@@ -163,6 +159,7 @@ contract BridgeGuardTest is Test {
                 )
             );
             pubs[i] = vm.parseJsonBytes(out, ".public_key");
+            salts[i] = vm.parseJsonBytes32(out, ".identifier_salt");
         }
         guard = new BridgeGuard(_signers(), 3, BridgeGuard.Mode.Hybrid, 60);
         assertEq(address(guard), predicted);
@@ -350,7 +347,7 @@ contract BridgeGuardTest is Test {
         guard.approveRoot(root, _attest(guard.rootDigest(root), _ids(0, 1, 2), true));
         vm.warp(vm.getBlockTimestamp() + 60);
         BridgeGuard.Signer[] memory fake = new BridgeGuard.Signer[](1);
-        fake[0] = BridgeGuard.Signer(address(0), pubs[1]);
+        fake[0] = BridgeGuard.Signer(address(0), pubs[1], salts[1]);
         bytes32 fd = guard.configDigest(fake, 1, BridgeGuard.Mode.PostQuantum);
         bytes32 rd = guard.revokeDigest(root);
         (bytes memory honest, bytes memory poison) = _equivocate(1, rd, fd, 700);
@@ -463,6 +460,8 @@ contract BridgeGuardTest is Test {
                 vm.toString(s[i].ecdsa),
                 "\",\"lmsPublicKey\":\"",
                 vm.toString(s[i].lmsPublicKey),
+                "\",\"identifierSalt\":\"",
+                vm.toString(s[i].identifierSalt),
                 "\"}"
             );
         }
@@ -472,9 +471,9 @@ contract BridgeGuardTest is Test {
     function test_reconfigure_with_possession_and_epoch_replay() public {
         bytes32 root = keccak256("root-11");
         BridgeGuard.Attestation[] memory stale = _attest(guard.rootDigest(root), _ids(0, 1, 2), true);
-        (string memory newDir, bytes memory newPub) = _newKey("joiner");
+        (string memory newDir, bytes memory newPub, bytes32 newSalt) = _newKey("joiner");
         BridgeGuard.Signer[] memory s = _signers();
-        s[3] = BridgeGuard.Signer(address(0), newPub);
+        s[3] = BridgeGuard.Signer(address(0), newPub, newSalt);
         bytes32 cd = guard.configDigest(s, 3, BridgeGuard.Mode.PostQuantum);
         string memory out = _ffi(
             string.concat(
@@ -633,7 +632,8 @@ contract BridgeGuardTest is Test {
         s = _fakeSignersFor(4, 6, 3, _nextGuard(), block.chainid + 1);
         vm.expectRevert(BridgeGuard.InvalidConfiguration.selector);
         new BridgeGuard(s, 3, BridgeGuard.Mode.Hybrid, 60);
-        assertEq(guard.identifierTag(), _tag(address(guard)));
+        bytes32 salt = keccak256("salt");
+        assertEq(guard.identifierFor(salt), bytes16(keccak256(abi.encode(block.chainid, address(guard), salt))));
         assertTrue(next != address(guard));
     }
 
@@ -644,6 +644,40 @@ contract BridgeGuardTest is Test {
             copy[k] = s[0].lmsPublicKey[k];
         }
         s[1].lmsPublicKey = copy;
+        s[1].identifierSalt = s[0].identifierSalt;
+        vm.expectRevert(BridgeGuard.InvalidConfiguration.selector);
+        new BridgeGuard(s, 3, BridgeGuard.Mode.Hybrid, 60);
+    }
+
+    function test_key_presented_with_another_salt_rejected() public {
+        BridgeGuard.Signer[] memory s = _fakeSigners(4, 6, 3);
+        s[2].identifierSalt = keccak256("another salt");
+        vm.expectRevert(BridgeGuard.InvalidConfiguration.selector);
+        new BridgeGuard(s, 3, BridgeGuard.Mode.Hybrid, 60);
+    }
+
+    function test_identifier_matching_only_the_guard_prefix_rejected() public {
+        BridgeGuard.Signer[] memory s = _fakeSigners(4, 6, 3);
+        bytes memory prefixOnly = bytes.concat(s[1].lmsPublicKey);
+        for (uint256 k = 16; k < 24; k++) {
+            prefixOnly[k] = 0;
+        }
+        s[1].lmsPublicKey = prefixOnly;
+        vm.expectRevert(BridgeGuard.InvalidConfiguration.selector);
+        new BridgeGuard(s, 3, BridgeGuard.Mode.Hybrid, 60);
+    }
+
+    function testFuzz_only_the_salted_identifier_is_accepted(bytes32 salt, bytes16 forged) public {
+        address next = _nextGuard();
+        BridgeGuard.Signer[] memory s = _fakeSigners(4, 6, 3);
+        bytes16 bound = bytes16(keccak256(abi.encode(block.chainid, next, salt)));
+        vm.assume(forged != bound);
+        bytes memory pub = bytes.concat(s[3].lmsPublicKey);
+        for (uint256 k = 0; k < 16; k++) {
+            pub[8 + k] = forged[k];
+        }
+        s[3].lmsPublicKey = pub;
+        s[3].identifierSalt = salt;
         vm.expectRevert(BridgeGuard.InvalidConfiguration.selector);
         new BridgeGuard(s, 3, BridgeGuard.Mode.Hybrid, 60);
     }
@@ -664,12 +698,14 @@ contract BridgeGuardTest is Test {
         pure
         returns (BridgeGuard.Signer[] memory s)
     {
-        bytes8 tag = bytes8(keccak256(abi.encode(chain, g)));
         s = new BridgeGuard.Signer[](n);
         for (uint256 i = 0; i < n; i++) {
+            bytes32 salt = keccak256(abi.encode("salt", i));
+            bytes16 identifier = bytes16(keccak256(abi.encode(chain, g, salt)));
             s[i] = BridgeGuard.Signer(
                 address(uint160(i + 1)),
-                abi.encodePacked(lmsType, otsType, tag, bytes8(keccak256(abi.encode(i))), keccak256(abi.encode("k", i)))
+                abi.encodePacked(lmsType, otsType, identifier, keccak256(abi.encode("k", i))),
+                salt
             );
         }
     }

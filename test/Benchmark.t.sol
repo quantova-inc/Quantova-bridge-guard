@@ -38,7 +38,7 @@ contract BenchmarkTest is Test {
         return string.concat(base, "/b", vm.toString(i));
     }
 
-    function _key(uint256 height, uint256 w, address g) internal returns (uint256 i, bytes memory pub) {
+    function _key(uint256 height, uint256 w, address g) internal returns (uint256 i, bytes memory pub, bytes32 salt) {
         if (bytes(base).length == 0) base = string(_ffi("d=$(mktemp -d) && chmod 700 $d && printf %s $d"));
         i = keys++;
         string memory out = string(
@@ -59,6 +59,7 @@ contract BenchmarkTest is Test {
             )
         );
         pub = vm.parseJsonBytes(out, ".public_key");
+        salt = vm.parseJsonBytes32(out, ".identifier_salt");
     }
 
     function _sign(uint256 i, bytes32 digest) internal returns (bytes memory) {
@@ -81,7 +82,7 @@ contract BenchmarkTest is Test {
         uint256[2] memory hs = [uint256(5), 10];
         for (uint256 a = 0; a < 2; a++) {
             for (uint256 b = 0; b < 4; b++) {
-                (uint256 i, bytes memory pub) = _key(hs[a], ws[b], address(h));
+                (uint256 i, bytes memory pub,) = _key(hs[a], ws[b], address(h));
                 uint256 lo = type(uint256).max;
                 uint256 hi;
                 uint256 total;
@@ -109,9 +110,9 @@ contract BenchmarkTest is Test {
         address g = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
         s = new BridgeGuard.Signer[](n);
         for (uint256 k = 0; k < n; k++) {
-            (uint256 i, bytes memory pub) = _key(10, 4, g);
+            (uint256 i, bytes memory pub, bytes32 salt) = _key(10, 4, g);
             assertEq(i, first + k);
-            s[k] = BridgeGuard.Signer(vm.addr(i + 1), pub);
+            s[k] = BridgeGuard.Signer(vm.addr(i + 1), pub, salt);
         }
     }
 

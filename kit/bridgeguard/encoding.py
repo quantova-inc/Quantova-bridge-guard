@@ -33,8 +33,8 @@ def dynamic_bytes(b):
 def encode_signers(signers):
     n = len(signers)
     tuples = []
-    for ecdsa_address, lms_public_key in signers:
-        tuples.append(addr(ecdsa_address) + word(64) + dynamic_bytes(bytes(lms_public_key)))
+    for ecdsa_address, lms_public_key, identifier_salt in signers:
+        tuples.append(addr(ecdsa_address) + word(96) + b32(identifier_salt) + dynamic_bytes(bytes(lms_public_key)))
     offsets = []
     off = 32 * n
     for t in tuples:
@@ -46,8 +46,8 @@ def encode_signers(signers):
 REVOKE_TAG = keccak256(b"ERC8443_REVOKE_V1")
 
 
-def identifier_tag(chain_id, guard):
-    return keccak256(word(chain_id) + addr(guard))[:8]
+def identifier_for(chain_id, guard, salt):
+    return keccak256(word(chain_id) + addr(guard) + b32(salt))[:16]
 
 
 def root_digest(chain_id, guard, epoch, root):
@@ -133,8 +133,8 @@ def validate_config(signers, threshold, mode, chain_id=None, guard=None):
     seen_keys = set()
     seen_ecdsa = set()
     seen_identifiers = set()
-    tag = identifier_tag(chain_id, guard) if chain_id is not None and guard is not None else None
-    for ecdsa_address, public_key in signers:
+    bound = chain_id is not None and guard is not None
+    for ecdsa_address, public_key, identifier_salt in signers:
         gas, size = attestation_cost(public_key)
         if gas == 0:
             raise ValueError("unsupported or malformed LMS public key")
@@ -144,7 +144,7 @@ def validate_config(signers, threshold, mode, chain_id=None, guard=None):
             raise ValueError("duplicate LMS public key")
         seen_keys.add(public_key)
         identifier = bytes(public_key[8:24])
-        if tag is not None and identifier[:8] != tag:
+        if bound and identifier != identifier_for(chain_id, guard, identifier_salt):
             raise ValueError("LMS key is not bound to this guard and chain")
         if identifier in seen_identifiers:
             raise ValueError("duplicate LMS identifier")

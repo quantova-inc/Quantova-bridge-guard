@@ -21,18 +21,21 @@ contract ParityTest is Test {
         s = new BridgeGuard.Signer[](n);
         for (uint256 i = 0; i < n; i++) {
             s[i] = BridgeGuard.Signer(
-                address(uint160(uint256(_rand()))), abi.encodePacked(uint32(6), uint32(3), bytes16(_rand()), _rand())
+                address(uint160(uint256(_rand()))),
+                abi.encodePacked(uint32(6), uint32(3), bytes16(_rand()), _rand()),
+                _rand()
             );
         }
     }
 
     function setUp() public {
         address predicted = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
-        bytes8 tag = bytes8(keccak256(abi.encode(block.chainid, predicted)));
         BridgeGuard.Signer[] memory bound = new BridgeGuard.Signer[](3);
         for (uint256 i = 0; i < 3; i++) {
+            bytes32 salt = _rand();
+            bytes16 identifier = bytes16(keccak256(abi.encode(block.chainid, predicted, salt)));
             bound[i] = BridgeGuard.Signer(
-                address(uint160(i + 1)), abi.encodePacked(uint32(6), uint32(3), tag, bytes8(_rand()), _rand())
+                address(uint160(i + 1)), abi.encodePacked(uint32(6), uint32(3), identifier, _rand()), salt
             );
         }
         guard = new BridgeGuard(bound, 2, BridgeGuard.Mode.Hybrid, 60);
@@ -60,6 +63,8 @@ contract ParityTest is Test {
                 vm.toString(s[i].ecdsa),
                 "\",\"lms\":\"",
                 vm.toString(s[i].lmsPublicKey),
+                "\",\"salt\":\"",
+                vm.toString(s[i].identifierSalt),
                 "\"}"
             );
         }
