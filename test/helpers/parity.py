@@ -11,7 +11,7 @@ def h(s):
 
 
 a = json.loads(sys.argv[1])
-signers = [(x["ecdsa"], h(x["lms"])) for x in a["signers"]]
+signers = [(x["ecdsa"], h(x["lms"]), h(x["salt"])) for x in a["signers"]]
 leaves = [h(x) for x in a["leaves"]]
 root, proofs = encoding.merkle(leaves)
 out = {

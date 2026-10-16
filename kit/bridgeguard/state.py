@@ -278,7 +278,8 @@ def generate(directory, lms_type, ots_type, reserve=DEFAULT_RESERVE, *, chain_id
     with _Lock(directory):
         if os.path.exists(os.path.join(directory, KEY_FILE)):
             raise StateError("key already exists in this directory")
-        ident = encoding.identifier_tag(chain_id, guard) + secrets.token_bytes(8)
+        salt = secrets.token_bytes(32)
+        ident = encoding.identifier_for(chain_id, guard, salt)
         seed = secrets.token_bytes(32)
         randomizer_key = secrets.token_bytes(32)
         sk = lms.PrivateKey(lms_type, ots_type, ident, seed).build()
@@ -293,6 +294,7 @@ def generate(directory, lms_type, ots_type, reserve=DEFAULT_RESERVE, *, chain_id
                 "lms_type": lms_type, "ots_type": ots_type, "ident": ident.hex(), "seed": seed.hex(),
                 "randomizer_key": randomizer_key.hex(), "public_key": pub.hex(),
                 "chain_id": int(chain_id), "guard": "0x" + encoding.addr(guard)[12:].hex(),
+                "identifier_salt": salt.hex(),
             }
             _write_atomic(directory, KEY_FILE, json.dumps(key).encode())
             st = {"next": 0, "public_key": pub.hex(), "reserve": reserve, "fingerprint": _fingerprint(directory)}
@@ -301,11 +303,21 @@ def generate(directory, lms_type, ots_type, reserve=DEFAULT_RESERVE, *, chain_id
     return pub
 
 
+def identifier_salt(directory):
+    _check_directory(directory)
+    key = _read(directory, KEY_FILE)
+    if "identifier_salt" not in key:
+        raise StateError("key file has no identifier salt, generate a new key")
+    return bytes.fromhex(key["identifier_salt"])
+
+
 def check_binding(directory, chain_id, guard):
     _check_directory(directory)
     key = _read(directory, KEY_FILE)
     ident = bytes.fromhex(key["ident"])
-    if ident[:8] != encoding.identifier_tag(chain_id, guard):
+    if "identifier_salt" not in key:
+        raise StateError("key file has no identifier salt, generate a new key")
+    if ident != encoding.identifier_for(chain_id, guard, bytes.fromhex(key["identifier_salt"])):
         raise StateError("key is bound to another guard or chain, refusing to sign")
 
 

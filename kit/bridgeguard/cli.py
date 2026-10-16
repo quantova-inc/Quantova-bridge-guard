@@ -49,7 +49,7 @@ def _signer_args(p):
 
 def _load_signers(path):
     with open(path) as f:
-        return [(x["ecdsa"], _hex(x["lmsPublicKey"])) for x in json.load(f)]
+        return [(x["ecdsa"], _hex(x["lmsPublicKey"]), _hex(x["identifierSalt"], 32)) for x in json.load(f)]
 
 
 def main(argv=None):
@@ -116,7 +116,10 @@ def main(argv=None):
             args.dir, LMS_BY_HEIGHT[args.height], OTS_BY_W[args.winternitz], args.reserve,
             chain_id=args.chain_id, guard=args.guard,
         )
-        _out({"public_key": "0x" + pub.hex(), "key_hash": state.key_hash(pub), "capacity": 1 << args.height, "reserve": args.reserve})
+        _out({
+            "public_key": "0x" + pub.hex(), "identifier_salt": "0x" + state.identifier_salt(args.dir).hex(),
+            "key_hash": state.key_hash(pub), "capacity": 1 << args.height, "reserve": args.reserve,
+        })
     elif args.cmd == "status":
         st = state.status(args.dir)
         st["public_key"] = "0x" + st["public_key"]
@@ -143,7 +146,8 @@ def main(argv=None):
             raise SystemExit(f"refusing to sign an invalid configuration, {e}")
         _show({
             "purpose": "reconfigure", "chain_id": args.chain_id, "guard": args.guard, "epoch": args.epoch,
-            "signers": [{"ecdsa": a, "lms": "0x" + k.hex()} for a, k in signers], "threshold": args.threshold, "mode": args.mode,
+            "signers": [{"ecdsa": a, "lms": "0x" + k.hex(), "salt": "0x" + t.hex()} for a, k, t in signers],
+            "threshold": args.threshold, "mode": args.mode,
         })
         _attest(args, d, state.PURPOSE_CONFIG)
     elif args.cmd == "merkle":

@@ -13,6 +13,7 @@ contract BridgeGuard is IBridgeGuard {
     struct Signer {
         address ecdsa;
         bytes lmsPublicKey;
+        bytes32 identifierSalt;
     }
 
     struct Attestation {
@@ -98,9 +99,9 @@ contract BridgeGuard is IBridgeGuard {
         _configure(signers_, threshold_, mode_);
     }
 
-    /// Prefix binding every LMS identifier to this guard and chain
-    function identifierTag() public view returns (bytes8) {
-        return bytes8(keccak256(abi.encode(block.chainid, address(this))));
+    /// Derives the LMS identifier a key must carry on this guard and chain for a given salt
+    function identifierFor(bytes32 salt) public view returns (bytes16) {
+        return bytes16(keccak256(abi.encode(block.chainid, address(this), salt)));
     }
 
     /// Returns the number of committee members
@@ -378,12 +379,11 @@ contract BridgeGuard is IBridgeGuard {
         if (n == 0 || threshold_ > n || threshold_ * 2 <= n) revert InvalidConfiguration();
         uint256 worstGas;
         uint256 worstBytes;
-        bytes8 tag = identifierTag();
         for (uint256 i = 0; i < n; i++) {
             Signer memory s = signers_[i];
             if (s.lmsPublicKey.length != LMSVerifier.PUBLIC_KEY_LENGTH) revert InvalidConfiguration();
             bytes16 identifier = _identifier(s.lmsPublicKey);
-            if (bytes8(identifier) != tag) revert InvalidConfiguration();
+            if (identifier != identifierFor(s.identifierSalt)) revert InvalidConfiguration();
             (uint256 gasCost, uint256 bytesCost) = _attestationCost(s.lmsPublicKey);
             if (gasCost == 0) revert InvalidConfiguration();
             if (gasCost > worstGas) worstGas = gasCost;

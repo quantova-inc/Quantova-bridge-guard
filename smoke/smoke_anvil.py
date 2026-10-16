@@ -70,17 +70,18 @@ try:
     signers = []
     for i in range(4):
         kd = os.path.join(work, f"signer{i}")
-        pub = kit("keygen", "--dir", kd, "--height", "10", "--winternitz", "4", "--reserve", "8",
-                  "--chain-id", str(CHAIN), "--guard", predicted_guard)["public_key"]
+        generated = kit("keygen", "--dir", kd, "--height", "10", "--winternitz", "4", "--reserve", "8",
+                        "--chain-id", str(CHAIN), "--guard", predicted_guard)
+        pub, salt = generated["public_key"], generated["identifier_salt"]
         ek = os.path.join(work, f"ecdsa{i}.key")
         fd = os.open(ek, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         os.write(fd, secrets.token_hex(32).encode())
         os.close(fd)
         addr = kit("ecdsa-address", "--key-file", ek)["address"]
-        signers.append({"dir": kd, "pub": pub, "ecdsa_file": ek, "addr": addr})
+        signers.append({"dir": kd, "pub": pub, "salt": salt, "ecdsa_file": ek, "addr": addr})
     step("four signer keys generated", True, "LMS SHA256 M32 H10 with LMOTS W4, plus secp256k1")
 
-    signer_arg = "[" + ",".join(f"({s['addr']},{s['pub']})" for s in signers) + "]"
+    signer_arg = "[" + ",".join(f"({s['addr']},{s['pub']},{s['salt']})" for s in signers) + "]"
     guard = create("src/BridgeGuard.sol:BridgeGuard", signer_arg, "3", "0", "60")
     step("BridgeGuard deployed at the address its keys are bound to", guard.lower() == predicted_guard.lower(), guard)
     uln = create("test/BridgeGuard.t.sol:MockReceiveUln")
@@ -143,11 +144,11 @@ try:
     step("batch revoked by quorum", cast_call(guard, "isApproved(bytes32)(bool)", root) == "false", f"{gas} gas")
 
     sj = os.path.join(work, "signers.json")
-    json.dump([{"ecdsa": s["addr"], "lmsPublicKey": s["pub"]} for s in signers], open(sj, "w"))
+    json.dump([{"ecdsa": s["addr"], "lmsPublicKey": s["pub"], "identifierSalt": s["salt"]} for s in signers], open(sj, "w"))
     proof = attest("attest-config", 3, "--signers", sj, "--threshold", "3", "--mode", "1")
-    pgas = cast_send(guard, "provePossession((address,bytes)[],uint256,uint8,uint256,(uint256,bytes,bytes))", signer_arg, "3", "1", "3", proof)
+    pgas = cast_send(guard, "provePossession((address,bytes,bytes32)[],uint256,uint8,uint256,(uint256,bytes,bytes))", signer_arg, "3", "1", "3", proof)
     q = "[" + ",".join(attest("attest-config", i, "--signers", sj, "--threshold", "3", "--mode", "1") for i in (0, 1, 2)) + "]"
-    gas = cast_send(guard, "reconfigure((address,bytes)[],uint256,uint8,(uint256,bytes,bytes)[])", signer_arg, "3", "1", q)
+    gas = cast_send(guard, "reconfigure((address,bytes,bytes32)[],uint256,uint8,(uint256,bytes,bytes)[])", signer_arg, "3", "1", q)
     gas = f"{pgas} gas for the new member proof, {gas}"
     step("committee rotated to post quantum only mode with proof of possession",
          cast_call(guard, "mode()(uint8)") == "1" and cast_call(guard, "epoch()(uint64)") == "2", f"{gas} gas")
